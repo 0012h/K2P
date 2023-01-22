@@ -21,7 +21,7 @@ env:
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: K2P.config
   DIY_P1_SH: diy-part1.sh
-  DIY_P2_SH: diy-k2p.sh
+  DIY_P2_SH: diy-K2P.sh
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
   UPLOAD_COWTRANSFER: false
