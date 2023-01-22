@@ -8,7 +8,7 @@
 # Description: Build OpenWrt using GitHub Actions
 #
 
-name: XG1
+name: C-Life XG1
 
 on:
   repository_dispatch:
