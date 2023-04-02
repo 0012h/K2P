@@ -1,3 +1,10 @@
+<p align="center">
+    <img src="https://socialify.git.ci/Sitoi/dailycheckin/image?description=1&font=Rokkitt&forks=1&issues=1&language=1&owner=1&pattern=Circuit%20Board&pulls=1&stargazers=1&theme=Dark"/>
+    <br><strong><font size=50>OpenWrt云编译</font></strong>
+    <br>【K2P】/【YK-L1】/【XG1】
+</p>
+
+
 # OpenWrt固件
   
 默认地址192.168.2.1
