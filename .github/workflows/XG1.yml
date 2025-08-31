@@ -1,265 +1,152 @@
-# OpenWrt 固件编译工作流
-name: OpenWrt 固件自动编译
+# Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+# https://github.com/P3TERX/Actions-OpenWrt
+# Description: Build OpenWrt using GitHub Actions
+#
+
+name: C-Life XG1
 
 on:
-  workflow_dispatch:  # 手动触发
-  push:               # 代码推送时触发
-    branches: [ main, master ]
-  pull_request:       # PR 时触发
-    branches: [ main, master ]
+  repository_dispatch:
+  workflow_dispatch:
+
 
 env:
-  源码仓库地址: https://github.com/coolsnowwolf/lede
-  源码分支: master
-  feeds配置文件: feeds.conf.default
-  设备配置文件: XG1.config
-  自定义脚本1: diy-part1.sh
-  自定义脚本2: diy-XG1.sh
-  上传整目录: false
-  上传到WeTransfer: true
-  上传到Release: true
-  时区: Asia/Shanghai
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  REPO_BRANCH: master
+  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: XG1.config
+  DIY_P1_SH: diy-part1.sh
+  DIY_P2_SH: diy-XG1.sh
+  UPLOAD_BIN_DIR: false
+  UPLOAD_WETRANSFER: true
+  UPLOAD_RELEASE: true
+  TZ: Asia/Shanghai
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
-    - name: 检出代码库
+    - name: Checkout
       uses: actions/checkout@v4
 
-    - name: 设置编译环境
+    - name: Initialization environment
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo apt-get update -qq
-        sudo apt-get install -qq $(curl -fsSL https://raw.githubusercontent.com/P3TERX/Actions-OpenWrt/master/ubuntu-2204-depends.txt)
-        sudo apt-get autoremove -qq --purge
-        sudo apt-get clean -qq
-        sudo timedatectl set-timezone "$时区"
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install $(curl -fsSL git.io/depends-ubuntu-2004)
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
 
-    - name: 克隆OpenWrt源码
+    - name: Clone source code
       working-directory: /workdir
       run: |
-        echo "磁盘空间信息:"
         df -hT $PWD
-        git clone --depth 1 $源码仓库地址 -b $源码分支 openwrt
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
-        echo "源码克隆完成"
 
-    - name: 应用自定义配置
+    - name: Load custom feeds
       run: |
-        if [ -e "$feeds配置文件" ]; then
-          echo "应用 feeds 配置..."
-          cp "$feeds配置文件" openwrt/feeds.conf.default
-        fi
-        
-        if [ -e "$自定义脚本1" ]; then
-          echo "执行第一阶段自定义脚本..."
-          chmod +x "$自定义脚本1"
-          cd openwrt
-          ../"$自定义脚本1"
-          cd ..
-        fi
-
-    - name: 更新和安装feeds
-      run: |
-        echo "开始更新feeds..."
+        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+        chmod +x $DIY_P1_SH
         cd openwrt
-        ./scripts/feeds update -a
-        echo "开始安装feeds..."
-        ./scripts/feeds install -a
-        echo "feeds安装完成"
+        $GITHUB_WORKSPACE/$DIY_P1_SH
 
-    - name: 应用设备配置
+    - name: Update feeds
+      run: cd openwrt && ./scripts/feeds update -a
+
+    - name: Install feeds
+      run: cd openwrt && ./scripts/feeds install -a
+
+    - name: Load custom configuration
       run: |
-        if [ -d "files" ]; then
-          echo "复制文件系统文件..."
-          cp -r files openwrt/
-        fi
-        
-        if [ -e "$设备配置文件" ]; then
-          echo "应用设备配置文件..."
-          cp "$设备配置文件" openwrt/.config
-        fi
-        
-        if [ -e "$自定义脚本2" ]; then
-          echo "执行第二阶段自定义脚本..."
-          chmod +x "$自定义脚本2"
-          cd openwrt
-          ../"$自定义脚本2"
-          cd ..
-        fi
+        [ -e files ] && mv files openwrt/files
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+        chmod +x $DIY_P2_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P2_SH
 
-    - name: SSH连接到Actions (可选)
-      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
+    - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
+      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
       env:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
 
-    - name: 下载软件包
-      id: 下载软件包
+    - name: Download package
+      id: package
       run: |
-        echo "开始下载软件包..."
         cd openwrt
         make defconfig
-        make download -j$(nproc)
-        find dl -size -1024c -delete 2>/dev/null || true
-        echo "软件包下载完成"
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
 
-    - name: 编译固件
-      id: 编译固件
+    - name: Compile the firmware
+      id: compile
       run: |
         cd openwrt
-        echo "使用 $(nproc) 个线程进行编译..."
-        
-        if make -j$(nproc) ; then
-          echo "status=成功" >> $GITHUB_OUTPUT
-          echo "编译成功完成!"
-        else
-          echo "多线程编译失败，尝试单线程编译..."
-          if make -j1 ; then
-            echo "status=成功" >> $GITHUB_OUTPUT
-            echo "单线程编译成功!"
-          else
-            echo "单线程编译失败，尝试详细输出模式..."
-            make -j1 V=s
-            echo "status=失败" >> $GITHUB_OUTPUT
-            echo "编译失败!"
-            exit 1
-          fi
-        fi
-        
-        if grep -q '^CONFIG_TARGET.*DEVICE.*=y' .config; then
-          设备名称=$(grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/')
-          echo "设备名称=_${设备名称}" >> $GITHUB_ENV
-          echo "检测到设备: ${设备名称}"
-        fi
-        
-        echo "文件日期=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-        echo "编译时间: $(date)"
+        echo -e "$(nproc) thread compile"
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        echo "status=success" >> $GITHUB_OUTPUT
+        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-    - name: 检查磁盘空间
-      if: always()
-      run: |
-        echo "编译后磁盘空间使用情况:"
-        df -hT
+    - name: Check space usage
+      if: (!cancelled())
+      run: df -hT
 
-    - name: 上传整目录 (Artifact)
-      if: steps.编译固件.outputs.status == '成功' && env.上传整目录 == 'true'
+    - name: Upload bin directory
       uses: actions/upload-artifact@v4
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
-        name: OpenWrt编译输出_${{ env.设备名称 }}_${{ env.文件日期 }}
-        path: openwrt/bin/
-        retention-days: 7
+        name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: openwrt/bin
 
-    - name: 整理固件文件
-      id: 整理文件
-      if: steps.编译固件.outputs.status == '成功' && (env.上传到WeTransfer == 'true' || env.上传到Release == 'true')
+    - name: Organize files
+      id: organize
+      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
         cd openwrt/bin/targets/*/*
         rm -rf packages
-        
-        echo "固件路径=$(pwd)" >> $GITHUB_ENV
-        
-        echo "## 🎉 固件编译总结" >> $GITHUB_STEP_SUMMARY
-        echo "- **编译时间**: $(date)" >> $GITHUB_STEP_SUMMARY
-        echo "- **设备型号**: ${{ env.设备名称 }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **文件列表**:">> $GITHUB_STEP_SUMMARY
-        ls -la *.bin *.img *.gz 2>/dev/null | awk '{print "- " $0}' >> $GITHUB_STEP_SUMMARY || echo "- 未找到固件文件" >> $GITHUB_STEP_SUMMARY
-        
-        echo "status=成功" >> $GITHUB_OUTPUT
-        echo "文件整理完成"
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: 上传到WeTransfer
-      id: wetransfer上传
-      if: steps.整理文件.outputs.status == '成功' && env.上传到WeTransfer == 'true'
+    - name: Upload firmware to WeTransfer
+      id: wetransfer
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
       run: |
-        echo "开始上传到WeTransfer..."
-        cd ${{ env.固件路径 }}
-        curl -fsSL https://git.io/file-transfer | sh
-        ./transfer wet -s -p 8 --no-progress . 2>&1 | tee wetransfer.log
-        
-        WETRANSFER链接=$(grep -o 'https://we.tl/[^ ]*' wetransfer.log | head -n1)
-        if [ -n "$WETRANSFER链接" ]; then
-          echo "WeTransfer 下载链接: $WETRANSFER链接"
-          echo "url=$WETRANSFER链接" >> $GITHUB_OUTPUT
-          echo "- 🔗 [WeTransfer下载]($WETRANSFER链接)" >> $GITHUB_STEP_SUMMARY
-          echo "WeTransfer上传成功!"
-        else
-          echo "无法获取WeTransfer链接"
-          echo "::warning::WeTransfer上传可能失败"
-        fi
+        curl -fsSL git.io/file-transfer | sh
+        ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
+        echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
+        echo "::set-output name=url::$(cat wetransfer.log | grep https | cut -f3 -d" ")"
 
-    - name: 创建发布版本
-      id: 创建发布
-      if: steps.整理文件.outputs.status == '成功' && env.上传到Release == 'true'
+    - name: Generate release tag
+      id: tag
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
-        发布标签="$(date +"%Y.%m.%d-%H%M")"
-        echo "release_tag=$发布标签" >> $GITHUB_OUTPUT
-        
-        cat > 发布说明.md << EOF
-        # OpenWrt 固件编译 $发布标签
-        
-        ## 📱 设备型号: ${{ env.设备名称 }}
-        
-        ## 🔗 下载链接:
-        $(if [ "$上传到WeTransfer" = "true" ] && [ -n "${{ steps.wetransfer上传.outputs.url }}" ]; then echo "- 🔗 [WeTransfer](${{ steps.wetransfer上传.outputs.url }})"; fi)
-        
-        ## 📊 编译信息:
-        - **编译时间**: $(date)
-        - **源码仓库**: $源码仓库地址 ($源码分支)
-        - **触发方式**: ${{ github.event_name }}
-        - **GitHub运行器**: ${{ runner.os }}
-        
-        ## 📁 包含文件:
-        $(cd ${{ env.固件路径 }} && ls -la *.bin *.img *.gz 2>/dev/null | awk '{print "- " $0}' || echo "- 未找到固件文件")
-        
-        ## 🛠️ 使用说明:
-        1. 下载对应的固件文件
-        2. 通过Web界面或tftp方式刷入设备
-        3. 首次启动建议恢复出厂设置
-        
-        ## ⚠️ 注意事项:
-        - 刷机有风险，请谨慎操作
-        - 建议备份原始固件
-        - 如遇问题可通过Issue反馈
-        EOF
-        
-        echo "status=成功" >> $GITHUB_OUTPUT
-        echo "发布版本信息创建完成"
+        echo "::set-output name=release_tag::$(date +"%Y.%m.%d-%H%M")"
+        touch release.txt
+        [ $UPLOAD_COWTRANSFER = true ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
+        [ $UPLOAD_WETRANSFER = true ] && echo "🔗 [WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
+        echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: 上传到GitHub Release
-      if: steps.创建发布.outputs.status == '成功'
-      uses: softprops/action-gh-release@v2
+    - name: Upload firmware to release
+      uses: softprops/action-gh-release@v1
+      if: steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ steps.创建发布.outputs.release_tag }}
-        body_path: 发布说明.md
-        files: ${{ env.固件路径 }}/*
-        draft: false
-        prerelease: false
-
-    - name: 编译完成通知
-      if: always()
-      run: |
-        if [ "${{ steps.编译固件.outputs.status }}" = "成功" ]; then
-          echo "::notice::编译成功完成! 🎉"
-          echo "✅ **编译状态**: 成功完成" >> $GITHUB_STEP_SUMMARY
-          echo "🕒 **完成时间**: $(date)" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "::error::编译失败! ❌"
-          echo "❌ **编译状态**: 失败" >> $GITHUB_STEP_SUMMARY
-          echo "🕒 **失败时间**: $(date)" >> $GITHUB_STEP_SUMMARY
-        fi
-
-    - name: 清理工作空间
-      if: always()
-      run: |
-        echo "开始清理工作空间..."
-        sudo rm -rf /workdir/openwrt
-        echo "清理完成"
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
+        files: ${{ env.FIRMWARE }}/*
