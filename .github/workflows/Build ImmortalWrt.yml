@@ -106,7 +106,6 @@ jobs:
           echo "" >> release.txt
           echo "Build Date: $(date +"%Y-%m-%d %H:%M:%S %Z")" >> release.txt
           echo "Selected Config: ${{ env.SELECTED_CONFIG }}" >> release.txt
-          echo "Selected Hostname: ${{ env.SELECTED_HOSTNAME }}" >> release.txt
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: 上传固件到发布版 (Upload firmware to release)
