@@ -1,0 +1,134 @@
+#
+# This is free software, lisence use MIT.
+#
+# Copyright (C) 2019 P3TERX <https://p3terx.com>
+#
+# Copyright (C) 2020 KFERMercer <KFER.Mercer@gmail.com>
+#
+# <https://github.com/KFERMercer/OpenWrt-CI>
+#
+
+name: Build ImmortalWrt
+
+on:
+  workflow_dispatch:
+    inputs:
+      config_file:
+        description: '选择配置文件'
+        required: true
+        default: 'H3C.config'
+        type: choice
+        options:
+          - H3C.config
+
+env:
+  SELECTED_CONFIG: ${{ github.event.inputs.config_file }}
+  SELECTED_HOSTNAME: ${{ github.event.inputs.hostname }}
+  OPENWRT_SOURCE_DIR: openwrt
+  FIRMWARE_BUILD_DIR: ${{ github.workspace }}/openwrt/bin/targets
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    if: github.event.repository.owner.id == github.event.sender.id
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检查代码 (Checkout workflow repository)
+        uses: actions/checkout@v4
+
+      - name: 初始化环境 (Initialize environment)
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E apt-get update -yqq
+          sudo -E apt-get install -yqq build-essential asciidoc binutils bzip2 lib32gcc-s1 gawk gettext git libncurses5-dev libz-dev patch python3 unzip zlib1g-dev libc6-dev-i386 subversion flex uglifyjs git-core gcc-multilib p7zip p7zip-full msmtp libssl-dev texinfo libglib2.0-dev xmlto qemu-utils upx libelf-dev autoconf automake libtool autopoint device-tree-compiler g++-multilib
+          sudo -E apt-get autoremove --purge -yqq
+          sudo -E apt-get clean -yqq
+
+      - name: 克隆ImmortalWrt源代码 (Clone ImmortalWrt source)
+        run: |
+          git clone https://github.com/hanwckf/immortalwrt-mt798x ${{ env.OPENWRT_SOURCE_DIR }}
+
+      # - name: 加载自定义源 (Load custom feeds)
+      #   working-directory: ${{ env.OPENWRT_SOURCE_DIR }}
+      #   run: |
+      #     # 如果需要加载自定义 feeds，可以在这里取消注释并添加
+      #     # echo "src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages.git;main" >> feeds.conf.default
+      #     # echo "src-git passwall https://github.com/xiaorouji/openwrt-passwall.git;main" >> feeds.conf.default
+
+      - name: 更新软件源 (Update feeds)
+        working-directory: ${{ env.OPENWRT_SOURCE_DIR }}
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: 应用选择的配置文件 (Apply selected config file)
+        working-directory: ${{ env.OPENWRT_SOURCE_DIR }}
+        run: |
+          echo "使用配置文件: ${{ env.SELECTED_CONFIG }}"
+          cp "${{ github.workspace }}/configs/${{ env.SELECTED_CONFIG }}" .config
+          echo "已应用配置文件: ${{ github.workspace }}/configs/${{ env.SELECTED_CONFIG }}"
+
+      - name: 下载依赖包 (Download dependencies)
+        working-directory: ${{ env.OPENWRT_SOURCE_DIR }}
+        run: |
+          make defconfig
+          make download -j$(nproc)
+          find dl -size -1024c -exec ls -l {} \;
+          find dl -size -1024c -exec rm -f {} \;
+
+      - name: 编译固件 (Compile firmware)
+        working-directory: ${{ env.OPENWRT_SOURCE_DIR }}
+        run: |
+          echo -e "$(nproc) thread build."
+          make -j$(nproc) V=s
+
+      - name: 删除编译目录中的packages文件夹 (Delete packages folder in compile directory)
+        working-directory: ${{ env.OPENWRT_SOURCE_DIR }}
+        run: |
+          echo "正在查找并删除 '${{ env.FIRMWARE_BUILD_DIR }}/**/packages' 目录..."
+          find ${{ env.FIRMWARE_BUILD_DIR }} -type d -name "packages" -exec rm -rf {} +
+          echo "已删除所有 '${{ env.FIRMWARE_BUILD_DIR }}/**/packages' 目录。"
+
+      - name : 上传编译目录 (Upload compiled firmware directory)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ImmortalWrt_firmware
+          path: ${{ env.FIRMWARE_BUILD_DIR }}
+
+      - name: 生成发布标签 (Generate release tag)
+        id: tag
+        run: |
+          echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+          echo "ImmortalWrt Firmware" > release.txt
+          echo "" >> release.txt
+          echo "Build Date: $(date +"%Y-%m-%d %H:%M:%S %Z")" >> release.txt
+          echo "Selected Config: ${{ env.SELECTED_CONFIG }}" >> release.txt
+          echo "Selected Hostname: ${{ env.SELECTED_HOSTNAME }}" >> release.txt
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: 上传固件到发布版 (Upload firmware to release)
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          body_path: release.txt
+          files: |
+            ${{ env.FIRMWARE_BUILD_DIR }}/**
+
+      - name: 删除旧工作流运行 (Delete old workflow runs)
+        uses: Mattraks/delete-workflow-runs@v2.0.1
+        with:
+          retain_days: 1
+          keep_minimum_runs: 2
+
+      - name: 移除旧发布版 (Remove old releases)
+        uses: dev-drprasad/delete-older-releases@v0.2.1
+        with:
+          keep_latest: 3
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
