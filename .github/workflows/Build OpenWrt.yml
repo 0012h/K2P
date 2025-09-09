@@ -148,25 +148,6 @@ jobs:
           files: |
             ${{ env.FIRMWARE_BUILD_DIR }}/**
 
-      - name: 打包固件目录 (Archive firmware directory)
-        id: archive_firmware
-        run: |
-          ARCHIVE_NAME="openwrt_firmware_${{ steps.tag.outputs.release_tag }}.tar.gz"
-          # 切换到 FIRMWARE_BUILD_DIR 的父目录，然后打包 FIRMWARE_BUILD_DIR
-          # 这将确保 tar 包中包含 'targets' 目录本身
-          cd $(dirname "${{ env.FIRMWARE_BUILD_DIR }}")
-          tar -zcvf "${GITHUB_WORKSPACE}/${ARCHIVE_NAME}" $(basename "${{ env.FIRMWARE_BUILD_DIR }}")
-          echo "ARCHIVE_PATH=${GITHUB_WORKSPACE}/${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
-
-      - name: 上传到WeTransfer
-        run: |
-          curl -fsSL git.io/file-transfer | sh
-          # 使用上一步生成的归档文件路径进行上传
-          ./transfer wet -s -p 16 --no-progress ${{ steps.archive_firmware.outputs.ARCHIVE_PATH }} 2>&1 | tee wetransfer.log
-          # 修正 grep https 后的 awk 提取，确保只获取 URL
-          echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
-          echo "wetransfer_url=$(cat wetransfer.log | grep -o 'https://wetransfer.com/[^ ]*')" >> $GITHUB_OUTPUT
-
       - name: 删除旧工作流运行 (Delete old workflow runs)
         uses: Mattraks/delete-workflow-runs@v2.0.1
         with:
