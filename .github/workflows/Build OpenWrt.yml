@@ -129,7 +129,7 @@ jobs:
       - name: 生成发布标签 (Generate release tag)
         id: tag
         run: |
-          echo "release_tag=$(date +"%Y.%m.%d-%H%M CST")" >> $GITHUB_OUTPUT
+          echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
           echo "OpenWrt Firmware" > release.txt
           echo "" >> release.txt
           echo "Build Date: $(date +"%Y-%m-%d %H:%M:%S CST")" >> release.txt
